@@ -235,128 +235,45 @@ def xgboost_forecast(frame, train, targets, exogenous, equations, steps, future=
         history = pd.concat([history, pd.DataFrame([prediction], index=[index])])
     return np.asarray(predictions)
 
-def select_variance_stable_vector_data(
-    frame,
-    targets,
-    equations,
-    columns,
-    threshold=0.95,
-    max_equations=2,
-):
+def select_variance_stable_vector_data(frame, targets, equations, columns, threshold=0.95, max_equations=2):
     selected = list(targets)
-
     if not equations:
         return frame[selected]
 
-    equation_columns = [
-        column
-        for column in equations
-        if column in frame.columns and column not in selected
-    ]
-
+    equation_columns = [column for column in equations if column in frame.columns and column not in targets]
     if not equation_columns:
         return frame[selected]
 
-    candidate_sources = [
-        source
-        for source in columns.values()
-        if source is not None and source not in targets
-    ]
-
-    filtered_sources = filter_multicollinear_variables(
-        frame,
-        candidate_sources,
-        threshold=threshold,
-    )
-
-    filtered_equations = equation_features(
-        frame,
-        columns,
-        keep_variables=set(filtered_sources),
-    )
-
-    equation_candidates = [
-        column
-        for column in equation_columns
-        if column in filtered_equations.columns
-        and filtered_equations[column].notna().any()
-    ]
+    candidate_sources = [source for source in columns.values() if source is not None and source not in targets]
+    filtered_sources = filter_multicollinear_variables(frame, candidate_sources, threshold=threshold)
+    filtered_equations = equation_features(frame, columns, keep_variables=set(filtered_sources))
+    equation_candidates = [column for column in equation_columns if column in filtered_equations.columns and filtered_equations[column].notna().any()]
 
     if not equation_candidates:
-        return pd.concat(
-            [
-                frame[selected],
-                filtered_equations.iloc[:, :1],
-            ],
-            axis=1,
-        )
+        return pd.concat([frame[selected], filtered_equations.iloc[:, :1]], axis=1)
 
     kept = equation_candidates[:max_equations]
-
     if not kept:
         kept = [filtered_equations.columns[0]]
+    return pd.concat([frame[selected], filtered_equations[kept]], axis=1)
 
-    return pd.concat(
-        [
-            frame[selected],
-            filtered_equations[kept],
-        ],
-        axis=1,
-    )
 
-def run_method(
-    method,
-    frame,
-    train,
-    targets,
-    exogenous,
-    equations,
-    steps,
-    use_equations_in_var_vecm=False,
-    resolved_columns=None,
-):
+def run_method(method, frame, train, targets, exogenous, equations, steps, use_equations_in_var_vecm=False, resolved_columns=None):
     if method in ("VAR", "VECM"):
         vector_data = train[targets]
-
         if use_equations_in_var_vecm and equations:
-         resolved_columns = resolved_columns or {
-            target: target for target in targets
-        }
-
-        vector_data = select_variance_stable_vector_data(
-            train,
-            targets,
-            equations,
-            resolved_columns,
-        )
-
+            resolved_columns = resolved_columns or {target: target for target in targets}
+            vector_data = select_variance_stable_vector_data(train, targets, equations, resolved_columns)
         try:
             if method == "VAR":
-                return var_forecast(
-                    vector_data,
-                    steps
-                )[:, :len(targets)]
-
-            return vecm_forecast(
-                vector_data,
-                steps
-            )[:, :len(targets)]
-        
+                return var_forecast(vector_data, steps)[:, :len(targets)]
+            return vecm_forecast(vector_data, steps)[:, :len(targets)]
         except Exception:
             if use_equations_in_var_vecm and equations:
                 fallback = train[targets]
-
                 if method == "VAR":
-                    return var_forecast(
-                        fallback,
-                        steps,
-                    )[:, :len(targets)]
-
-                return vecm_forecast(
-                    fallback,
-                    steps,
-                )[:, :len(targets)]
-
+                    return var_forecast(fallback, steps)[:, :len(targets)]
+                return vecm_forecast(fallback, steps)[:, :len(targets)]
             raise
         
     signal_columns = list(targets) + [column for column in equations if column not in targets]
@@ -727,8 +644,10 @@ def build_equation_frame(frame, resolved, custom_equations):
             lhs, rhs_result = evaluate_user_equation(expression, frame)
             equation_name = f"eq_custom_{index}_{lhs}"
             equations[equation_name] = rhs_result
-        except ValueError:
-            continue
+        except ValueError as exc:
+            st.warning(
+                f"Custom equation {index} is invalid: {exc}"
+            )
 
     return equations
 
@@ -1073,6 +992,7 @@ if prediction_mode == "Both":
             hide_index=True,
             use_container_width=True,
         )
+
 
 
 
