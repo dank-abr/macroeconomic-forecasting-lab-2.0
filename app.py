@@ -33,10 +33,8 @@ FORECAST_VARIABLES = [
     "GNI", "Gov_exp", "Interest_rate", "CSPI",
 ]
 
-
 def normalise(value):
     return "".join(c.lower() for c in str(value) if c.isalnum())
-
 
 def resolve_columns(frame):
     lookup = {normalise(c): c for c in frame.columns}
@@ -50,13 +48,11 @@ def resolve_columns(frame):
         resolved[name] = next((lookup[normalise(c)] for c in candidates if normalise(c) in lookup), None)
     return resolved
 
-
 def parse_years(frame, column):
     values = frame[column]
     if pd.api.types.is_numeric_dtype(values):
         return pd.to_datetime(values.astype("Int64").astype(str), format="%Y", errors="coerce")
     return pd.to_datetime(values, errors="coerce")
-
 
 def clean_data(frame, date_column, fill_missing=True):
     result = frame.copy()
@@ -69,10 +65,8 @@ def clean_data(frame, date_column, fill_missing=True):
         result = result.interpolate(limit_direction="both").ffill().bfill()
     return result
 
-
 def safe_log(series):
     return np.log(series.where(series > 0))
-
 
 def filter_multicollinear_variables(frame, variables, threshold=0.95):
     ordered = []
@@ -89,7 +83,6 @@ def filter_multicollinear_variables(frame, variables, threshold=0.95):
         if max(correlations, default=0.0) < threshold:
             ordered.append(variable)
     return ordered
-
 
 def equation_features(frame, columns, keep_variables=None):
     keep_set = set(keep_variables) if keep_variables is not None else None
@@ -109,7 +102,6 @@ def equation_features(frame, columns, keep_variables=None):
     result["eq_business_confidence"] = column("GDP_growth") + safe_log(column("Gov_exp")) + column("Interest_rate") + column("Inflation_rate") + safe_log(column("Exchange_rate_PHP_to_USD")) + safe_log(column("CSPI"))
     result["eq_private_investment"] = safe_log(column("Private_investment")).diff() + column("GDP_growth") + column("Business_confidence")
     return result.replace([np.inf, -np.inf], np.nan)
-
 
 def evaluate_user_equation(expression, frame):
     expr = (expression or "").strip()
@@ -177,7 +169,6 @@ def evaluate_user_equation(expression, frame):
     output = output.replace([np.inf, -np.inf], np.nan)
     return lhs, output
 
-
 def metric_values(actual, predicted, training):
     actual = np.asarray(actual, dtype=float)
     predicted = np.asarray(predicted, dtype=float)
@@ -191,20 +182,16 @@ def metric_values(actual, predicted, training):
         "MASE": float(np.mean(np.abs(actual - predicted)) / scale),
     }
 
-
 def arima_forecast(train, steps):
     return np.column_stack([ARIMA(train[column], order=(1, 1, 1), trend="t").fit().forecast(steps) for column in train.columns])
-
 
 def var_forecast(train, steps):
     fitted = VAR(train).fit(maxlags=min(4, max(1, len(train) // 10)), ic="aic", trend="c")
     return fitted.forecast(train.values[-fitted.k_ar:], steps)
 
-
 def vecm_forecast(train, steps):
     fitted = VECM(train, k_ar_diff=1, coint_rank=min(1, len(train.columns) - 1), deterministic="co").fit()
     return fitted.predict(steps=steps)
-
 
 def garch_forecast(train, steps):
     from arch import arch_model
@@ -216,7 +203,6 @@ def garch_forecast(train, steps):
         forecasts.append(train[column].iloc[-1] + np.cumsum(mean_changes))
     return np.column_stack(forecasts)
 
-
 def xgb_features(frame, targets, exogenous, equations, index, history):
     values = {}
     for lag in (1, 2, 3):
@@ -226,7 +212,6 @@ def xgb_features(frame, targets, exogenous, equations, index, history):
     for column in exogenous + equations:
         values[column] = source.get(column, frame[column].iloc[-1] if column in frame else 0)
     return values
-
 
 def xgboost_forecast(frame, train, targets, exogenous, equations, steps, future=False):
     from xgboost import XGBRegressor
@@ -250,48 +235,130 @@ def xgboost_forecast(frame, train, targets, exogenous, equations, steps, future=
         history = pd.concat([history, pd.DataFrame([prediction], index=[index])])
     return np.asarray(predictions)
 
-
-def select_variance_stable_vector_data(frame, targets, equations, columns, threshold=0.95, max_equations=2):
+def select_variance_stable_vector_data(
+    frame,
+    targets,
+    equations,
+    columns,
+    threshold=0.95,
+    max_equations=2,
+):
     selected = list(targets)
+
     if not equations:
         return frame[selected]
 
-    equation_columns = [column for column in equations if column in frame.columns and column not in targets]
+    equation_columns = [
+        column
+        for column in equations
+        if column in frame.columns and column not in selected
+    ]
+
     if not equation_columns:
         return frame[selected]
 
-    candidate_sources = [source for source in columns.values() if source is not None and source not in targets]
-    filtered_sources = filter_multicollinear_variables(frame, candidate_sources, threshold=threshold)
-    filtered_equations = equation_features(frame, columns, keep_variables=set(filtered_sources))
-    equation_candidates = [column for column in equation_columns if column in filtered_equations.columns and filtered_equations[column].notna().any()]
+    candidate_sources = [
+        source
+        for source in columns.values()
+        if source is not None and source not in targets
+    ]
+
+    filtered_sources = filter_multicollinear_variables(
+        frame,
+        candidate_sources,
+        threshold=threshold,
+    )
+
+    filtered_equations = equation_features(
+        frame,
+        columns,
+        keep_variables=set(filtered_sources),
+    )
+
+    equation_candidates = [
+        column
+        for column in equation_columns
+        if column in filtered_equations.columns
+        and filtered_equations[column].notna().any()
+    ]
 
     if not equation_candidates:
-        return pd.concat([frame[selected], filtered_equations.iloc[:, :1]], axis=1)
+        return pd.concat(
+            [
+                frame[selected],
+                filtered_equations.iloc[:, :1],
+            ],
+            axis=1,
+        )
 
     kept = equation_candidates[:max_equations]
+
     if not kept:
         kept = [filtered_equations.columns[0]]
-    return pd.concat([frame[selected], filtered_equations[kept]], axis=1)
 
+    return pd.concat(
+        [
+            frame[selected],
+            filtered_equations[kept],
+        ],
+        axis=1,
+    )
 
-def run_method(method, frame, train, targets, exogenous, equations, steps, use_equations_in_var_vecm=False, resolved_columns=None):
+def run_method(
+    method,
+    frame,
+    train,
+    targets,
+    exogenous,
+    equations,
+    steps,
+    use_equations_in_var_vecm=False,
+    resolved_columns=None,
+):
     if method in ("VAR", "VECM"):
         vector_data = train[targets]
+
         if use_equations_in_var_vecm and equations:
-            resolved_columns = resolved_columns or {target: target for target in targets}
-            vector_data = select_variance_stable_vector_data(train, targets, equations, resolved_columns)
+         resolved_columns = resolved_columns or {
+            target: target for target in targets
+        }
+
+        vector_data = select_variance_stable_vector_data(
+            train,
+            targets,
+            equations,
+            resolved_columns,
+        )
+
         try:
             if method == "VAR":
-                return var_forecast(vector_data, steps)[:, :len(targets)]
-            return vecm_forecast(vector_data, steps)[:, :len(targets)]
+                return var_forecast(
+                    vector_data,
+                    steps
+                )[:, :len(targets)]
+
+            return vecm_forecast(
+                vector_data,
+                steps
+            )[:, :len(targets)]
+        
         except Exception:
             if use_equations_in_var_vecm and equations:
                 fallback = train[targets]
-                if method == "VAR":
-                    return var_forecast(fallback, steps)[:, :len(targets)]
-                return vecm_forecast(fallback, steps)[:, :len(targets)]
-            raise
 
+                if method == "VAR":
+                    return var_forecast(
+                        fallback,
+                        steps,
+                    )[:, :len(targets)]
+
+                return vecm_forecast(
+                    fallback,
+                    steps,
+                )[:, :len(targets)]
+
+            raise
+        
     signal_columns = list(targets) + [column for column in equations if column not in targets]
     feature_set = train[signal_columns] if signal_columns else train[targets]
 
@@ -300,7 +367,6 @@ def run_method(method, frame, train, targets, exogenous, equations, steps, use_e
     if method == "GARCH":
         return garch_forecast(feature_set, steps)[:, :len(targets)]
     return xgboost_forecast(frame, train[targets], targets, exogenous, equations, steps)
-
 
 def in_sample_predictions(frame, train, targets, exogenous, equations, method, use_equations_in_var_vecm=False, resolved_columns=None):
     if method == "XGBoost":
@@ -392,7 +458,6 @@ def in_sample_predictions(frame, train, targets, exogenous, equations, method, u
         return predictions
     raise ValueError(f"Unsupported method: {method}")
 
-
 def in_sample_metric_values(actual, predicted, training):
     actual = np.asarray(actual, dtype=float)
     predicted = np.asarray(predicted, dtype=float)
@@ -400,7 +465,6 @@ def in_sample_metric_values(actual, predicted, training):
     if not valid.any():
         raise ValueError("The model did not produce valid in-sample predictions.")
     return metric_values(actual[valid], predicted[valid], training)
-
 
 def run_prediction_mode(prediction_mode, methods, model_frame, train, test, targets, exogenous, equation_columns, target_labels, use_equations_in_var_vecm, resolved):
     predictions, errors = {}, {}
@@ -447,7 +511,6 @@ def run_prediction_mode(prediction_mode, methods, model_frame, train, test, targ
             st.warning(f"{method} could not be fitted for {prediction_mode}: {error}")
     return predictions, errors
 
-
 st.set_page_config(page_title="Macroeconomic Forecasting Lab", layout="wide")
 
 st.markdown(
@@ -479,7 +542,6 @@ st.markdown(
 
 LOGO_URL = "https://upload.wikimedia.org/wikipedia/commons/1/1c/Philippine_Institute_for_Development_Studies_%28PIDS%29.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original"
 
-
 def render_app_title():
     st.markdown(
         f"""
@@ -495,7 +557,6 @@ def render_app_title():
         """,
         unsafe_allow_html=True,
     )
-
 
 def require_password():
     configured_password = st.secrets.get("APP_PASSWORD")
@@ -514,7 +575,6 @@ def require_password():
             st.rerun()
         st.error("Incorrect password.")
     st.stop()
-
 
 require_password()
 render_app_title()
@@ -657,16 +717,26 @@ if not forecast_outputs or not forecast_inputs or not selected_methods:
 
 compare_prediction_modes = compare_prediction_modes or prediction_mode == "Both"
 
-equations = equation_features(data, resolved)
-for index, expression in enumerate(custom_equations, start=1):
-    if not expression or not expression.strip():
-        continue
-    try:
-        lhs, rhs_result = evaluate_user_equation(expression, data)
-        equation_name = f"eq_custom_{index}_{lhs}"
-        equations[equation_name] = rhs_result
-    except ValueError as exc:
-        st.warning(f"Custom equation {index} is invalid: {exc}")
+def build_equation_frame(frame, resolved, custom_equations):
+    equations = equation_features(frame,resolved)
+
+    for index, expression in enumerate(custom_equations, start=1):
+        if not expression or not expression.strip():
+            continue
+        try:
+            lhs, rhs_result = evaluate_user_equation(expression, frame)
+            equation_name = f"eq_custom_{index}_{lhs}"
+            equations[equation_name] = rhs_result
+        except ValueError:
+            continue
+
+    return equations
+
+equations = build_equation_frame(
+    data,
+    resolved,
+    custom_equations,
+)
 
 model_frame = pd.concat([data, equations], axis=1)
 targets = [resolved[name] for name in forecast_outputs]
@@ -825,9 +895,9 @@ if compare_prediction_modes:
 forecast_years = list(range(2026, 2026 + int(forecast_horizon)))
 forecast_index = pd.to_datetime([f"{year}-12-31" for year in forecast_years])
 future_base = pd.DataFrame([data.loc[data.index.year == 2027].iloc[-1].to_dict()] * len(forecast_years), index=forecast_index).reindex(columns=data.columns)
+future_equations=build_equation_frame(future_base,resolved,custom_equations)
 future_frame = pd.concat([future_base, equation_features(future_base, resolved)], axis=1)
 forecast_frame = pd.concat([model_frame, future_frame])
-
 
 def build_prediction_table(prediction_values, prediction_index):
     forecast_table = pd.DataFrame(index=prediction_index)
@@ -838,7 +908,6 @@ def build_prediction_table(prediction_values, prediction_index):
     forecast_table.columns = pd.MultiIndex.from_tuples(forecast_table.columns)
     return forecast_table
 
-
 def restrict_to_forecast_horizon(prediction_values, prediction_index):
     years = np.asarray(prediction_index, dtype=int)
     mask = np.isin(years, forecast_years)
@@ -846,7 +915,6 @@ def restrict_to_forecast_horizon(prediction_values, prediction_index):
         method: values[mask]
         for method, values in prediction_values.items()
     }, years[mask]
-
 
 def restrict_to_post_sample_horizon(prediction_values):
     years = np.asarray(forecast_years, dtype=int)
@@ -856,7 +924,6 @@ def restrict_to_post_sample_horizon(prediction_values):
         for method, values in prediction_values.items()
     }, years[mask]
 
-
 def combine_prediction_values(first_values, first_years, second_values, second_years):
     methods = [method for method in first_values if method in second_values]
     combined_values = {
@@ -864,7 +931,6 @@ def combine_prediction_values(first_values, first_years, second_values, second_y
         for method in methods
     }
     return combined_values, np.concatenate([first_years, second_years])
-
 
 def future_predictions_for(training_frame, label):
     results = {}
@@ -884,7 +950,6 @@ def future_predictions_for(training_frame, label):
         except Exception as error:
             st.warning(f"{method} {label} forecast failed: {error}")
     return results
-
 
 def in_sample_display_predictions():
     fitted_predictions = {
@@ -919,7 +984,6 @@ def in_sample_display_predictions():
         display_predictions[method] = values
     return display_predictions
 
-
 def render_forecast_table(title, caption, prediction_values, filename, prediction_index=None):
     st.subheader(title)
     st.caption(caption)
@@ -940,7 +1004,6 @@ def render_forecast_table(title, caption, prediction_values, filename, predictio
         "text/csv",
         key=f"download_{filename}",
     )
-
 
 st.header(f"{forecast_years[0]}-{forecast_years[-1]} forecasts")
 if prediction_mode == "Both":
@@ -1010,3 +1073,6 @@ if prediction_mode == "Both":
             hide_index=True,
             use_container_width=True,
         )
+
+
+
