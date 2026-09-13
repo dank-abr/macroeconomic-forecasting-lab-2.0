@@ -275,7 +275,7 @@ def run_method(method, frame, train, targets, exogenous, equations, steps, use_e
                     return var_forecast(fallback, steps)[:, :len(targets)]
                 return vecm_forecast(fallback, steps)[:, :len(targets)]
             raise
-        
+
     signal_columns = list(targets) + [column for column in equations if column not in targets]
     feature_set = train[signal_columns] if signal_columns else train[targets]
 
