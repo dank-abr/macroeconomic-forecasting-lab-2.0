@@ -538,7 +538,7 @@ with st.sidebar:
         st.markdown(
             "<div style='display:flex; align-items:center; gap:0.5rem;'>"
             "<span>Custom equation (optional)</span>"
-            "<span title='Optional: add a custom equation only if you want to include one in the forecast models.' style='display:inline-flex; align-items:center; justify-content:center; width:1.2rem; height:1.2rem; border-radius:50%; background:#2d7df6; color:white; font-size:0.8rem; font-weight:700; cursor:help;'>?</span>"
+            "<span title='Optional: add a custom equation only if you want to include one in the forecast models. The variables are case sensitive so please copy the name of variables written in the editable data preview. Else, error will prompt' style='display:inline-flex; align-items:center; justify-content:center; width:1.2rem; height:1.2rem; border-radius:50%; background:#2d7df6; color:white; font-size:0.8rem; font-weight:700; cursor:help;'>?</span>"
             "</div>",
             unsafe_allow_html=True,
         )
@@ -569,7 +569,7 @@ with st.sidebar:
             default=[],
         )
         use_equations_in_var_vecm = True
-        forecast_horizon = st.number_input("Forecast horizon (years)", min_value=5, max_value=5, value=5, step=1)
+        forecast_horizon = st.number_input("Forecast horizon (years)", min_value=1, max_value=10, value=5, step=1)
         st.markdown(
             "<div style='display:flex; align-items:center; gap:0.5rem; margin-top:0.25rem;'>"
             "<span style='font-size:1.1rem; font-weight:700;'>Backtest share</span>"
@@ -928,17 +928,17 @@ st.header(f"{forecast_years[0]}-{forecast_years[-1]} forecasts")
 if prediction_mode == "Both":
     in_sample_future_predictions = in_sample_display_predictions()
     render_forecast_table(
-        "In-sample forecast estimates (2026-2030)",
+        f"In-sample forecast estimates ({forecast_years[0]}-{forecast_years[-1]})",
         "Forecasts from models fitted using the full historical dataset.",
         in_sample_future_predictions,
-        "in_sample_forecasts_2026_2030.csv",
+        "in_sample_forecasts_{forecast_years[0]}_{forecast_years[-1]}.csv",
     )
     out_of_sample_predictions = future_predictions_for(model_frame, "out-of-sample")
     render_forecast_table(
-        f"Out-of-sample forecast estimates (2026-2030, backtest share: {test_fraction:.0%})",
-        "The displayed forecast uses the same full-history projection logic across all five years. The retained chronological backtest remains available above for validation.",
+        f"Out-of-sample forecast estimates ({forecast_years[0]}-{forecast_years[-1]}, backtest share: {test_fraction:.0%})",
+        "The displayed forecast uses the same full-history projection logic across all years. The retained chronological backtest remains available above for validation.",
         out_of_sample_predictions,
-        "out_of_sample_forecasts_2026_2030.csv",
+        "out_of_sample_forecasts_{forecast_years[0]}_{forecast_years[-1]}.csv",
     )
 else:
     if prediction_mode == "In-sample fit":
@@ -981,7 +981,7 @@ if prediction_mode == "Both":
                 "Mean absolute percentage difference": float(np.nanmean(np.abs(percent_deviations))),
             })
     if forecast_difference_rows:
-        st.header("2026-2030 forecast difference")
+        st.header(f"{forecast_years[0]}_{forecast_years[-1]} forecast difference")
         st.caption("This calculation compares future forecast estimates from full-history in-sample models with forecasts trained only through the pre-holdout period. It is separate from the original out-of-sample backtest.")
         st.dataframe(
             pd.DataFrame(forecast_difference_rows).style.format({
