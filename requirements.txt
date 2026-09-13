@@ -1,7 +1,7 @@
 streamlit
-pandas
-numpy
-statsmodels
-arch
-xgboost
-scikit-learn
+numpy==2.5.2
+pandas==3.0.5
+scikit-learn==1.9.0
+statsmodels==0.15.0
+xgboost==3.4.1
+arch==8.0.0
